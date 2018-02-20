@@ -57,6 +57,16 @@ func CreateRuleset(transitions ...Transition) Ruleset {
 	return r
 }
 
+//ErrInvalidTransition is returned when no transition is defined between
+type ErrInvalidTransition struct {
+	Transition
+}
+
+//Error returns ErrInvalidTransition error message
+func (e ErrInvalidTransition) Error() string {
+	return fmt.Sprintf("error no transition from %s to %s", e.Origin(), e.Exit())
+}
+
 // IsValidTransition determines if a transition is allowed.
 // This occurs in parallel.
 // NOTE: Guards are not halted if they are short-circuited for some
@@ -90,7 +100,7 @@ func (r Ruleset) IsValidTransition(subject Stater, goal State) []error {
 
 		return nil // All guards passed
 	}
-	return []error{fmt.Errorf("no transition from %s to %s", subject.CurrentState(), goal)}
+	return []error{ErrInvalidTransition{attempt}}
 }
 
 // Stater can be passed into the FSM. The Stater is reponsible for setting
