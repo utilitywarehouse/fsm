@@ -84,16 +84,12 @@ func (r Ruleset) IsValidTransition(subject Stater, goal State) []error {
 			}(guard)
 		}
 
-		guardErrors := make([]error, 0)
+		guardErrors := []error{}
 		for range guards {
-			select {
-			case err := <-outcome:
-				if err != nil {
-					guardErrors = append(guardErrors, err)
-				}
+			if err := <-outcome; err != nil {
+				guardErrors = append(guardErrors, err)
 			}
 		}
-
 		if len(guardErrors) > 0 {
 			return guardErrors
 		}
