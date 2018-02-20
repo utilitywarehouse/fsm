@@ -1,16 +1,14 @@
 package fsm
 
-import "errors"
+import (
+	"fmt"
+)
 
 type State string
 
 // Guard provides protection against transitioning to the goal State.
-// Returning true/false indicates if the transition is permitted or not.
-type Guard func(subject Stater, goal State) bool
-
-var (
-	InvalidTransition = errors.New("invalid transition")
-)
+// Returning an error or nil indicates if the transition is permitted or not.
+type Guard func(subject Stater, goal State) error
 
 // Transition is the change between States
 type Transition interface {
@@ -39,8 +37,11 @@ func (r Ruleset) AddRule(t Transition, guards ...Guard) {
 
 // AddTransition adds a transition with a default rule
 func (r Ruleset) AddTransition(t Transition) {
-	r.AddRule(t, func(subject Stater, goal State) bool {
-		return subject.CurrentState() == t.Origin()
+	r.AddRule(t, func(subject Stater, goal State) error {
+		if subject.CurrentState() != t.Origin() {
+			return fmt.Errorf("invalid transition from %s to %s", subject.CurrentState(), t.Origin())
+		}
+		return nil
 	})
 }
 
@@ -56,15 +57,16 @@ func CreateRuleset(transitions ...Transition) Ruleset {
 	return r
 }
 
-// Permitted determines if a transition is allowed.
+// IsValidTransition determines if a transition is allowed.
 // This occurs in parallel.
 // NOTE: Guards are not halted if they are short-circuited for some
 // transition. They may continue running *after* the outcome is determined.
-func (r Ruleset) Permitted(subject Stater, goal State) bool {
+// Returns a list of errors if the transition is invalid or nil otherwise
+func (r Ruleset) IsValidTransition(subject Stater, goal State) []error {
 	attempt := T{subject.CurrentState(), goal}
 
 	if guards, ok := r[attempt]; ok {
-		outcome := make(chan bool)
+		outcome := make(chan error)
 
 		for _, guard := range guards {
 			go func(g Guard) {
@@ -72,18 +74,23 @@ func (r Ruleset) Permitted(subject Stater, goal State) bool {
 			}(guard)
 		}
 
+		guardErrors := make([]error, 0)
 		for range guards {
 			select {
-			case o := <-outcome:
-				if !o {
-					return false
+			case err := <-outcome:
+				if err != nil {
+					guardErrors = append(guardErrors, err)
 				}
 			}
 		}
 
-		return true // All guards passed
+		if len(guardErrors) > 0 {
+			return guardErrors
+		}
+
+		return nil // All guards passed
 	}
-	return false // No rule found for the transition
+	return []error{fmt.Errorf("no transition from %s to %s", subject.CurrentState(), goal)}
 }
 
 // Stater can be passed into the FSM. The Stater is reponsible for setting
@@ -102,13 +109,14 @@ type Machine struct {
 }
 
 // Transition attempts to move the Subject to the Goal state.
-func (m Machine) Transition(goal State) error {
-	if m.Rules.Permitted(m.Subject, goal) {
+func (m Machine) Transition(goal State) []error {
+	transitionErrors := m.Rules.IsValidTransition(m.Subject, goal)
+	if len(transitionErrors) == 0 {
 		m.Subject.SetState(goal)
 		return nil
 	}
 
-	return InvalidTransition
+	return transitionErrors
 }
 
 // New initializes a machine
